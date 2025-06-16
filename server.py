@@ -69,32 +69,52 @@ def get_auth_code():
 
 # ====== Ensure Tokens ======
 async def ensure_creds():
-    if os.path.exists(TOKEN_FILE):
-        with open(TOKEN_FILE, "r") as f:
-            tokens = json.load(f)
-        return HubSpot(access_token=tokens['access_token'])
-
-    code = get_auth_code()
-    print("Got auth code")
-
-    try:
-        temp_client = HubSpot()
-        tokens = temp_client.oauth.tokens_api.create(
-            grant_type="authorization_code",
-            redirect_uri=REDIRECT_URI,
-            client_id=CLIENT_ID,
-            client_secret=CLIENT_SECRET,
-            code=code
-        )
-        access_token = tokens.access_token
+    def save_token(access_token):
         with open(TOKEN_FILE, "w") as f:
             json.dump({"access_token": access_token}, f)
         os.chmod(TOKEN_FILE, 0o600)
-        print("Access token saved")
-        return HubSpot(access_token=access_token)
+
+    def load_token():
+        if os.path.exists(TOKEN_FILE):
+            with open(TOKEN_FILE, "r") as f:
+                return json.load(f).get("access_token")
+        return None
+
+    def get_new_token():
+        code = get_auth_code()
+        print("Got auth code")
+
+        try:
+            temp_client = HubSpot()
+            tokens = temp_client.oauth.tokens_api.create(
+                grant_type="authorization_code",
+                redirect_uri=REDIRECT_URI,
+                client_id=CLIENT_ID,
+                client_secret=CLIENT_SECRET,
+                code=code
+            )
+            access_token = tokens.access_token
+            save_token(access_token)
+            print("Access token saved")
+            return access_token
+        except ApiException as e:
+            print("Failed to fetch tokens:", e)
+            exit()
+
+    access_token = load_token() or get_new_token()
+    client = HubSpot(access_token=access_token)
+
+    try:
+        client.crm.contacts.basic_api.get_page(limit=1)
+        return client
     except ApiException as e:
-        print("Failed to fetch tokens:", e)
-        exit()
+        if e.status == 401:
+            print("Token expired or invalid. Getting new one...")
+            access_token = get_new_token()
+            return HubSpot(access_token=access_token)
+        else:
+            print("HubSpot API error:", e)
+            exit()
 
 @mcp.tool()
 async def create_contact(
