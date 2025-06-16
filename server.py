@@ -75,7 +75,7 @@ async def ensure_creds():
         return HubSpot(access_token=tokens['access_token'])
 
     code = get_auth_code()
-    print("✅ Got auth code")
+    print("Got auth code")
 
     try:
         temp_client = HubSpot()
@@ -90,10 +90,10 @@ async def ensure_creds():
         with open(TOKEN_FILE, "w") as f:
             json.dump({"access_token": access_token}, f)
         os.chmod(TOKEN_FILE, 0o600)
-        print("✅ Access token saved")
+        print("Access token saved")
         return HubSpot(access_token=access_token)
     except ApiException as e:
-        print("❌ Failed to fetch tokens:", e)
+        print("Failed to fetch tokens:", e)
         exit()
 
 @mcp.tool()
@@ -127,7 +127,7 @@ async def create_contact(
 
     try:
         contact = client.crm.contacts.basic_api.create(data)
-        print(f"✅ Created contact: {firstname} {lastname}, ID: {contact.id}")
+        print(f"Created contact: {firstname} {lastname}, ID: {contact.id}")
     except Exception as e:
         print("❌ Error creating contact:", e)
 
@@ -176,7 +176,7 @@ async def search_contacts(
 
     for contact in results.results:
         props = contact.properties
-        print("🧾 Contact:")
+        print(" Contact:")
         print(f"  ID: {contact.id}")
         print(f"  Name: {props.get('firstname')} {props.get('lastname')}")
         print(f"  Email: {props.get('email')}")
@@ -206,11 +206,11 @@ async def update_contact_by_id(
 
     try:
         updated_contact = client.crm.contacts.basic_api.update(contact_id, data)
-        print(f"✅ Updated contact ID: {contact_id}")
+        print(f"Updated contact ID: {contact_id}")
         for key, value in updates.items():
             print(f"  {key}: {value}")
     except Exception as e:
-        print("❌ Failed to update contact:", e)
+        print("Failed to update contact:", e)
 
 
 @mcp.tool()
@@ -226,9 +226,9 @@ async def delete_contact_by_id(contact_id: str) -> None:
     client = await ensure_creds()
     try:
         client.crm.contacts.basic_api.archive(contact_id)
-        print(f"✅ Deleted contact ID: {contact_id}")
+        print(f"Deleted contact ID: {contact_id}")
     except Exception as e:
-        print("❌ Failed to delete contact:", e)
+        print("Failed to delete contact:", e)
 
 if __name__ == "__main__":
     mcp.run(transport="stdio")
