@@ -5,7 +5,7 @@ import threading
 from hubspot import HubSpot
 from hubspot.oauth import ApiException
 from mcp.server.fastmcp import FastMCP
-from hubspot.crm.contacts import SimplePublicObjectInputForCreate, Filter, FilterGroup, PublicObjectSearchRequest
+from hubspot.crm.contacts import SimplePublicObjectInputForCreate, Filter, FilterGroup, PublicObjectSearchRequest, SimplePublicObjectInput
 
 # ====== Credentials ======
 CLIENT_ID = "930200dd-a49b-4e00-b6db-194c506de7df"
@@ -119,9 +119,26 @@ def search_contacts(client, **kwargs):
         print(f"  Lead Status: {props.get('hs_lead_status')}")
         print("  -------------------")
 
+def update_contact_by_id(client, contact_id, updates: dict):
+    data = SimplePublicObjectInput(properties=updates)
+
+    try:
+        updated_contact = client.crm.contacts.basic_api.update(contact_id, data)
+        print(f"✅ Updated contact ID: {contact_id}")
+        for key, value in updates.items():
+            print(f"  {key}: {value}")
+    except Exception as e:
+        print("❌ Failed to update contact:", e)
 
 if __name__ == "__main__":
     #create_contact(client, "Tony", "Stark", "ironman@starkindustries.com", "+91-9876543210")
 
-    search_contacts(client)
+    contact_id = "146083150549"  # Put actual HubSpot contact ID
+    updates = {
+        "firstname": "Bruce",
+        "lastname": "Wayne",
+        "email": "batman@wayneenterprises.com",
+        "phone": "+91-1112223334"
+    }
+    update_contact_by_id(client, contact_id, updates)
 
