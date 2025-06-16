@@ -130,15 +130,25 @@ def update_contact_by_id(client, contact_id, updates: dict):
     except Exception as e:
         print("❌ Failed to update contact:", e)
 
-if __name__ == "__main__":
-    #create_contact(client, "Tony", "Stark", "ironman@starkindustries.com", "+91-9876543210")
+def delete_contact_by_id(client, contact_id):
+    try:
+        client.crm.contacts.basic_api.archive(contact_id)
+        print(f"✅ Deleted contact ID: {contact_id}")
+    except Exception as e:
+        print("❌ Failed to delete contact:", e)
 
-    contact_id = "146083150549"  # Put actual HubSpot contact ID
+
+if __name__ == "__main__":
+    #create_contact(client, "antony", "Stark", "anironman@starkindustries.com", "+91-9876543210")
+    #search_contacts(client,email="anironman@starkindustries.com")
+    #delete_contact_by_id(client, '147129159386')
+    '''contact_id = "146083150549"  # Put actual HubSpot contact ID
     updates = {
         "firstname": "Bruce",
         "lastname": "Wayne",
         "email": "batman@wayneenterprises.com",
         "phone": "+91-1112223334"
     }
-    update_contact_by_id(client, contact_id, updates)
+    update_contact_by_id(client, contact_id, updates)'''
+
 
