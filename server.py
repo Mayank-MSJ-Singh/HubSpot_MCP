@@ -59,7 +59,7 @@ def get_auth_code():
         "response_type": "code"
     }
     auth_url = f"https://app.hubspot.com/oauth/authorize?{urlencode(params)}"
-    print("👉 Opening browser for auth...")
+    print("Opening browser for auth...")
     webbrowser.open(auth_url)
 
     while 'code' not in code_holder:
@@ -129,7 +129,7 @@ async def create_contact(
         contact = client.crm.contacts.basic_api.create(data)
         print(f"Created contact: {firstname} {lastname}, ID: {contact.id}")
     except Exception as e:
-        print("❌ Error creating contact:", e)
+        print("Error creating contact:", e)
 
 
 @mcp.tool()
