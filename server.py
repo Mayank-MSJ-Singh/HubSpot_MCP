@@ -6,36 +6,52 @@ from hubspot import HubSpot
 from hubspot.oauth import ApiException
 from mcp.server.fastmcp import FastMCP
 from hubspot.crm.contacts import SimplePublicObjectInputForCreate, Filter, FilterGroup, PublicObjectSearchRequest, SimplePublicObjectInput
+import os
+import json
+import asyncio
 
-# ====== Credentials ======
+
+
+# ====== MCP Setup ======
+mcp = FastMCP("HubSpot")
+
+# ====== Config ======
 CLIENT_ID = "930200dd-a49b-4e00-b6db-194c506de7df"
 CLIENT_SECRET = "f3463abf-8286-4ed7-96d5-437620aa399c"
 REDIRECT_URI = "http://localhost:9999/callback"
-SCOPES = "crm.objects.contacts.read crm.objects.contacts.write crm.schemas.contacts.read crm.schemas.contacts.write oauth"
+TOKEN_FILE = "hubspot_token.json"
+SCOPES = (
+    "crm.objects.companies.read "
+    "crm.objects.companies.write "
+    "crm.objects.contacts.read "
+    "crm.objects.contacts.write "
+    "crm.schemas.companies.read "
+    "crm.schemas.companies.write "
+    "crm.schemas.contacts.read "
+    "crm.schemas.contacts.write "
+    "oauth"
+)
 
-# MCP server
-mcp = FastMCP("HubSpot")
 
-# ====== Auto-capture code ======
+# ====== Handle Redirect Auth ======
 def get_auth_code():
-    auth_code_holder = {}
+    code_holder = {}
 
     class OAuthHandler(BaseHTTPRequestHandler):
         def do_GET(self):
             parsed_url = urlparse(self.path)
             query = parse_qs(parsed_url.query)
             if "code" in query:
-                auth_code_holder['code'] = query["code"][0]
+                code_holder['code'] = query["code"][0]
                 self.send_response(200)
-                self.send_header('Content-type', 'text/html')
                 self.end_headers()
-                self.wfile.write(b"Authorization successful! You can close this window.")
+                self.wfile.write(b"Auth successful. You can close this tab.")
             else:
-                self.send_error(400, "Missing code")
+                self.send_error(400, "No code in redirect.")
 
     def run_server():
-        httpd = HTTPServer(('localhost', 9999), OAuthHandler)
-        httpd.handle_request()
+        server = HTTPServer(('localhost', 9999), OAuthHandler)
+        server.handle_request()
 
     threading.Thread(target=run_server, daemon=True).start()
 
@@ -46,37 +62,48 @@ def get_auth_code():
         "response_type": "code"
     }
     auth_url = f"https://app.hubspot.com/oauth/authorize?{urlencode(params)}"
-    print("👉 Opening browser to authorize...")
+    print("👉 Opening browser for auth...")
     webbrowser.open(auth_url)
 
-    while 'code' not in auth_code_holder:
+    while 'code' not in code_holder:
         pass
 
-    return auth_code_holder['code']
+    return code_holder['code']
 
 
-# ====== Main Auth Flow ======
-auth_code = get_auth_code()
-print("✅ Got auth code:", auth_code)
+# ====== Ensure Tokens ======
+async def ensure_creds():
+    if os.path.exists(TOKEN_FILE):
+        with open(TOKEN_FILE, "r") as f:
+            tokens = json.load(f)
+        return HubSpot(access_token=tokens['access_token'])
 
-try:
-    temp_client = HubSpot()
-    tokens = temp_client.oauth.tokens_api.create(
-        grant_type="authorization_code",
-        redirect_uri=REDIRECT_URI,
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET,
-        code=auth_code
-    )
-    access_token = tokens.access_token
-    client = HubSpot(access_token=access_token)
-    print("✅ Got access token")
-except ApiException as e:
-    print("❌ Failed to get tokens:", e)
-    exit()
+    code = get_auth_code()
+    print("✅ Got auth code")
 
+    try:
+        temp_client = HubSpot()
+        tokens = temp_client.oauth.tokens_api.create(
+            grant_type="authorization_code",
+            redirect_uri=REDIRECT_URI,
+            client_id=CLIENT_ID,
+            client_secret=CLIENT_SECRET,
+            code=code
+        )
+        access_token = tokens.access_token
+        with open(TOKEN_FILE, "w") as f:
+            json.dump({"access_token": access_token}, f)
+        os.chmod(TOKEN_FILE, 0o600)
+        print("✅ Access token saved")
+        return HubSpot(access_token=access_token)
+    except ApiException as e:
+        print("❌ Failed to fetch tokens:", e)
+        exit()
 
-def create_contact(client, firstname, lastname, email, phone=None):
+@mcp.tool()
+async def create_contact(client, firstname, lastname, email, phone=None):
+
+    await ensure_creds()
     properties = {
         "firstname": firstname,
         "lastname": lastname,
@@ -93,7 +120,11 @@ def create_contact(client, firstname, lastname, email, phone=None):
     except Exception as e:
         print("❌ Error creating contact:", e)
 
-def search_contacts(client, **kwargs):
+
+@mcp.tool()
+async def search_contacts(client, **kwargs):
+
+    await ensure_creds()
     filters = []
     for field, value in kwargs.items():
         if value:
@@ -119,7 +150,12 @@ def search_contacts(client, **kwargs):
         print(f"  Lead Status: {props.get('hs_lead_status')}")
         print("  -------------------")
 
-def update_contact_by_id(client, contact_id, updates: dict):
+
+@mcp.tool()
+async def update_contact_by_id(client, contact_id, updates: dict):
+
+    await ensure_creds()
+
     data = SimplePublicObjectInput(properties=updates)
 
     try:
@@ -130,7 +166,11 @@ def update_contact_by_id(client, contact_id, updates: dict):
     except Exception as e:
         print("❌ Failed to update contact:", e)
 
-def delete_contact_by_id(client, contact_id):
+
+@mcp.tool()
+async def delete_contact_by_id(client, contact_id):
+
+    await ensure_creds()
     try:
         client.crm.contacts.basic_api.archive(contact_id)
         print(f"✅ Deleted contact ID: {contact_id}")
@@ -139,16 +179,23 @@ def delete_contact_by_id(client, contact_id):
 
 
 if __name__ == "__main__":
-    #create_contact(client, "antony", "Stark", "anironman@starkindustries.com", "+91-9876543210")
-    #search_contacts(client,email="anironman@starkindustries.com")
-    #delete_contact_by_id(client, '147129159386')
-    '''contact_id = "146083150549"  # Put actual HubSpot contact ID
-    updates = {
-        "firstname": "Bruce",
-        "lastname": "Wayne",
-        "email": "batman@wayneenterprises.com",
-        "phone": "+91-1112223334"
-    }
-    update_contact_by_id(client, contact_id, updates)'''
+        async def main():
+            client = await ensure_creds()
+            #await search_contacts(client, email="anironman@starkindustries.com")
+            #await create_contact(client, "Antony", "Stark", "anironman@starkindustries.com", "+91-9876543210")
+            # await delete_contact_by_id(client, '147129159386')
+            '''
+            contact_id = "146083150549"
+            updates = {
+                "firstname": "Bruce",
+                "lastname": "Wayne",
+                "email": "batman@wayneenterprises.com",
+                "phone": "+91-1112223334"
+            }
+            await update_contact_by_id(client, contact_id, updates)
+            '''
+
+
+        asyncio.run(main())
 
 
