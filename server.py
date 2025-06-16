@@ -97,7 +97,23 @@ async def ensure_creds():
         exit()
 
 @mcp.tool()
-async def create_contact(firstname, lastname, email, phone=None):
+async def create_contact(
+    firstname: str,
+    lastname: str,
+    email: str,
+    phone: str | None = None
+) -> None:
+    """
+    Creates a new contact in HubSpot.
+
+    Parameters:
+    - firstname: Contact's first name
+    - lastname: Contact's last name
+    - email: Contact's email address
+    - phone: (Optional) Contact's phone number
+
+    This will create a contact with the given details and print the new contact's ID.
+    """
     client = await ensure_creds()
     properties = {
         "firstname": firstname,
@@ -115,11 +131,33 @@ async def create_contact(firstname, lastname, email, phone=None):
     except Exception as e:
         print("❌ Error creating contact:", e)
 
+
 @mcp.tool()
-async def search_contacts(**kwargs):
+async def search_contacts(
+    firstname: str | None = None,
+    lastname: str | None = None,
+    email: str | None = None,
+    phone: str | None = None
+) -> None:
+    """
+    Searches for HubSpot contacts matching the given fields.
+
+    Parameters (all optional):
+    - firstname: Filter by first name
+    - lastname: Filter by last name
+    - email: Filter by email
+    - phone: Filter by phone number
+
+    Prints matching contacts and their basic details. If no filters are provided, returns the first 10.
+    """
     client = await ensure_creds()
     filters = []
-    for field, value in kwargs.items():
+    for field, value in {
+        "firstname": firstname,
+        "lastname": lastname,
+        "email": email,
+        "phone": phone
+    }.items():
         if value:
             filters.append(Filter(property_name=field, operator="EQ", value=value))
 
@@ -127,7 +165,10 @@ async def search_contacts(**kwargs):
         filter_group = FilterGroup(filters=filters)
         search_request = PublicObjectSearchRequest(
             filter_groups=[filter_group],
-            properties=["firstname", "lastname", "email", "phone", "company", "contact_owner", "hs_lead_status"]
+            properties=[
+                "firstname", "lastname", "email", "phone",
+                "company", "contact_owner", "hs_lead_status"
+            ]
         )
         results = client.crm.contacts.search_api.do_search(public_object_search_request=search_request)
     else:
@@ -145,8 +186,21 @@ async def search_contacts(**kwargs):
         print(f"  Lead Status: {props.get('hs_lead_status')}")
         print("  -------------------")
 
+
 @mcp.tool()
-async def update_contact_by_id(contact_id, updates: dict):
+async def update_contact_by_id(
+    contact_id: str,
+    updates: dict[str, str]
+) -> None:
+    """
+    Updates a HubSpot contact by ID.
+
+    Parameters:
+    - contact_id: ID of the contact to update
+    - updates: Dictionary of fields to update (e.g., {"email": "new@email.com"})
+
+    Applies the updates and prints the modified fields.
+    """
     client = await ensure_creds()
     data = SimplePublicObjectInput(properties=updates)
 
@@ -158,8 +212,17 @@ async def update_contact_by_id(contact_id, updates: dict):
     except Exception as e:
         print("❌ Failed to update contact:", e)
 
+
 @mcp.tool()
-async def delete_contact_by_id(contact_id):
+async def delete_contact_by_id(contact_id: str) -> None:
+    """
+    Deletes (archives) a contact in HubSpot.
+
+    Parameters:
+    - contact_id: ID of the contact to delete
+
+    Archives the contact and confirms the deletion.
+    """
     client = await ensure_creds()
     try:
         client.crm.contacts.basic_api.archive(contact_id)
