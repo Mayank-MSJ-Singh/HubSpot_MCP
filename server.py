@@ -10,8 +10,6 @@ import os
 import json
 import asyncio
 
-
-
 # ====== MCP Setup ======
 mcp = FastMCP("HubSpot")
 
@@ -31,7 +29,6 @@ SCOPES = (
     "crm.schemas.contacts.write "
     "oauth"
 )
-
 
 # ====== Handle Redirect Auth ======
 def get_auth_code():
@@ -70,7 +67,6 @@ def get_auth_code():
 
     return code_holder['code']
 
-
 # ====== Ensure Tokens ======
 async def ensure_creds():
     if os.path.exists(TOKEN_FILE):
@@ -101,9 +97,8 @@ async def ensure_creds():
         exit()
 
 @mcp.tool()
-async def create_contact(client, firstname, lastname, email, phone=None):
-
-    await ensure_creds()
+async def create_contact(firstname, lastname, email, phone=None):
+    client = await ensure_creds()
     properties = {
         "firstname": firstname,
         "lastname": lastname,
@@ -120,11 +115,9 @@ async def create_contact(client, firstname, lastname, email, phone=None):
     except Exception as e:
         print("❌ Error creating contact:", e)
 
-
 @mcp.tool()
-async def search_contacts(client, **kwargs):
-
-    await ensure_creds()
+async def search_contacts(**kwargs):
+    client = await ensure_creds()
     filters = []
     for field, value in kwargs.items():
         if value:
@@ -132,10 +125,12 @@ async def search_contacts(client, **kwargs):
 
     if filters:
         filter_group = FilterGroup(filters=filters)
-        search_request = PublicObjectSearchRequest(filter_groups=[filter_group], properties=["firstname", "lastname", "email", "phone", "company", "contact_owner", "hs_lead_status"])
+        search_request = PublicObjectSearchRequest(
+            filter_groups=[filter_group],
+            properties=["firstname", "lastname", "email", "phone", "company", "contact_owner", "hs_lead_status"]
+        )
         results = client.crm.contacts.search_api.do_search(public_object_search_request=search_request)
     else:
-        # If no filters, return all contacts (basic listing)
         results = client.crm.contacts.basic_api.get_page(limit=10)
 
     for contact in results.results:
@@ -150,12 +145,9 @@ async def search_contacts(client, **kwargs):
         print(f"  Lead Status: {props.get('hs_lead_status')}")
         print("  -------------------")
 
-
 @mcp.tool()
-async def update_contact_by_id(client, contact_id, updates: dict):
-
-    await ensure_creds()
-
+async def update_contact_by_id(contact_id, updates: dict):
+    client = await ensure_creds()
     data = SimplePublicObjectInput(properties=updates)
 
     try:
@@ -166,36 +158,14 @@ async def update_contact_by_id(client, contact_id, updates: dict):
     except Exception as e:
         print("❌ Failed to update contact:", e)
 
-
 @mcp.tool()
-async def delete_contact_by_id(client, contact_id):
-
-    await ensure_creds()
+async def delete_contact_by_id(contact_id):
+    client = await ensure_creds()
     try:
         client.crm.contacts.basic_api.archive(contact_id)
         print(f"✅ Deleted contact ID: {contact_id}")
     except Exception as e:
         print("❌ Failed to delete contact:", e)
 
-
 if __name__ == "__main__":
-        async def main():
-            client = await ensure_creds()
-            #await search_contacts(client, email="anironman@starkindustries.com")
-            #await create_contact(client, "Antony", "Stark", "anironman@starkindustries.com", "+91-9876543210")
-            # await delete_contact_by_id(client, '147129159386')
-            '''
-            contact_id = "146083150549"
-            updates = {
-                "firstname": "Bruce",
-                "lastname": "Wayne",
-                "email": "batman@wayneenterprises.com",
-                "phone": "+91-1112223334"
-            }
-            await update_contact_by_id(client, contact_id, updates)
-            '''
-
-
-        asyncio.run(main())
-
-
+    mcp.run(transport="stdio")
