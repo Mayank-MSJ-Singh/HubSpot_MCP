@@ -5,7 +5,7 @@ import threading
 from hubspot import HubSpot
 from hubspot.oauth import ApiException
 from mcp.server.fastmcp import FastMCP
-from hubspot.crm.contacts import SimplePublicObjectInputForCreate
+from hubspot.crm.contacts import SimplePublicObjectInputForCreate, Filter, FilterGroup, PublicObjectSearchRequest
 
 # ====== Credentials ======
 CLIENT_ID = "930200dd-a49b-4e00-b6db-194c506de7df"
@@ -93,9 +93,35 @@ def create_contact(client, firstname, lastname, email, phone=None):
     except Exception as e:
         print("❌ Error creating contact:", e)
 
+def search_contacts(client, **kwargs):
+    filters = []
+    for field, value in kwargs.items():
+        if value:
+            filters.append(Filter(property_name=field, operator="EQ", value=value))
+
+    if filters:
+        filter_group = FilterGroup(filters=filters)
+        search_request = PublicObjectSearchRequest(filter_groups=[filter_group], properties=["firstname", "lastname", "email", "phone", "company", "contact_owner", "hs_lead_status"])
+        results = client.crm.contacts.search_api.do_search(public_object_search_request=search_request)
+    else:
+        # If no filters, return all contacts (basic listing)
+        results = client.crm.contacts.basic_api.get_page(limit=10)
+
+    for contact in results.results:
+        props = contact.properties
+        print("🧾 Contact:")
+        print(f"  ID: {contact.id}")
+        print(f"  Name: {props.get('firstname')} {props.get('lastname')}")
+        print(f"  Email: {props.get('email')}")
+        print(f"  Phone: {props.get('phone')}")
+        print(f"  Company: {props.get('company')}")
+        print(f"  Contact Owner: {props.get('hubspot_owner_id')}")
+        print(f"  Lead Status: {props.get('hs_lead_status')}")
+        print("  -------------------")
+
 
 if __name__ == "__main__":
-    create_contact(client, "Tony", "Stark", "ironman@starkindustries.com", "+91-9876543210")
+    #create_contact(client, "Tony", "Stark", "ironman@starkindustries.com", "+91-9876543210")
 
-
+    search_contacts(client)
 
