@@ -73,22 +73,3 @@ except ApiException as e:
 
 access_token = tokens.access_token
 print("✅ Got access token")
-
-# ====== Fetch and Send Contacts ======
-client = HubSpot(access_token=access_token)
-response = client.crm.contacts.basic_api.get_page(limit=5)
-context_chunks = []
-
-for contact in response.results:
-    props = contact.properties
-    name = f"{props.get('firstname', '')} {props.get('lastname', '')}".strip()
-    email = props.get("email", "")
-    context_chunks.append(f"Contact: {name}, Email: {email}")
-
-payload = {
-    "session_id": "hubspot-session",
-    "role": "user",
-    "messages": [{"type": "text", "content": chunk} for chunk in context_chunks]
-}
-
-print(payload)
