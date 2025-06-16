@@ -137,18 +137,30 @@ async def search_contacts(
     firstname: str | None = None,
     lastname: str | None = None,
     email: str | None = None,
-    phone: str | None = None
+    phone: str | None = None,
+    limit: int | None = None
 ) -> None:
     """
-    Searches for HubSpot contacts matching the given fields.
+    Searches for contacts in HubSpot CRM based on optional filters.
 
-    Parameters (all optional):
-    - firstname: Filter by first name
-    - lastname: Filter by last name
-    - email: Filter by email
-    - phone: Filter by phone number
+    Parameters:
+    - firstname: (Optional) First name of the contact to search.
+    - lastname: (Optional) Last name of the contact to search.
+    - email: (Optional) Email of the contact to search.
+    - phone: (Optional) Phone number of the contact to search.
+    - limit: (Optional) Max number of contacts to return. If not provided, all matching contacts are returned.
 
-    Prints matching contacts and their basic details. If no filters are provided, returns the first 10.
+    If one or more filters are provided, it returns matching contacts.
+    If no filters are provided, it returns the first `limit` contacts (or all, if `limit` is None).
+
+    For each contact, the function prints:
+    - Contact ID
+    - Name (first and last)
+    - Email
+    - Phone number
+    - Associated company
+    - Contact owner
+    - Lead status
     """
     client = await ensure_creds()
     filters = []
@@ -161,30 +173,60 @@ async def search_contacts(
         if value:
             filters.append(Filter(property_name=field, operator="EQ", value=value))
 
-    if filters:
-        filter_group = FilterGroup(filters=filters)
-        search_request = PublicObjectSearchRequest(
-            filter_groups=[filter_group],
-            properties=[
-                "firstname", "lastname", "email", "phone",
-                "company", "contact_owner", "hs_lead_status"
-            ]
-        )
-        results = client.crm.contacts.search_api.do_search(public_object_search_request=search_request)
-    else:
-        results = client.crm.contacts.basic_api.get_page(limit=10)
+    try:
+        results = []
+        if filters:
+            filter_group = FilterGroup(filters=filters)
+            search_request = PublicObjectSearchRequest(
+                filter_groups=[filter_group],
+                properties=[
+                    "firstname", "lastname", "email", "phone",
+                    "company", "contact_owner", "hs_lead_status"
+                ],
+                limit=limit or 100  # HubSpot max page size is 100
+            )
+            page = client.crm.contacts.search_api.do_search(public_object_search_request=search_request)
+            results.extend(page.results)
+        else:
+            after = None
+            fetched = 0
+            while True:
+                page = client.crm.contacts.basic_api.get_page(
+                    limit=100,
+                    after=after,
+                    properties=[
+                        "firstname", "lastname", "email", "phone",
+                        "company", "contact_owner", "hs_lead_status"
+                    ]
+                )
+                results.extend(page.results)
+                fetched += len(page.results)
+                after = page.paging.next.after if page.paging and page.paging.next else None
+                if not after or (limit and fetched >= limit):
+                    break
 
-    for contact in results.results:
-        props = contact.properties
-        print(" Contact:")
-        print(f"  ID: {contact.id}")
-        print(f"  Name: {props.get('firstname')} {props.get('lastname')}")
-        print(f"  Email: {props.get('email')}")
-        print(f"  Phone: {props.get('phone')}")
-        print(f"  Company: {props.get('company')}")
-        print(f"  Contact Owner: {props.get('hubspot_owner_id')}")
-        print(f"  Lead Status: {props.get('hs_lead_status')}")
-        print("  -------------------")
+            if limit:
+                results = results[:limit]
+
+        if not results:
+            print("No contacts found.")
+            return
+
+        for contact in results:
+            props = contact.properties
+            print("Contact:")
+            print(f"  ID: {contact.id}")
+            print(f"  Name: {props.get('firstname')} {props.get('lastname')}")
+            print(f"  Email: {props.get('email')}")
+            print(f"  Phone: {props.get('phone')}")
+            print(f"  Company: {props.get('company')}")
+            print(f"  Contact Owner: {props.get('hubspot_owner_id')}")
+            print(f"  Lead Status: {props.get('hs_lead_status')}")
+            print("  -------------------")
+
+    except Exception as e:
+        print("Error searching contacts:", e)
+
 
 
 @mcp.tool()
