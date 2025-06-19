@@ -119,8 +119,8 @@ async def ensure_creds():
 @mcp.tool()
 async def create_contact(
     firstname: str,
-    lastname: str,
     email: str,
+    lastname: str | None = None,
     phone: str | None = None
 ) -> None:
     """
@@ -137,11 +137,12 @@ async def create_contact(
     client = await ensure_creds()
     properties = {
         "firstname": firstname,
-        "lastname": lastname,
         "email": email
     }
     if phone:
         properties["phone"] = phone
+    if lastname:
+        properties["lastname"] = lastname
 
     data = SimplePublicObjectInputForCreate(properties=properties)
 
@@ -293,4 +294,9 @@ async def delete_contact_by_id(contact_id: str) -> None:
         print("Failed to delete contact:", e)
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    async def main() -> None:
+        await ensure_creds()
+        await search_contacts()
+
+
+    asyncio.run(main())
