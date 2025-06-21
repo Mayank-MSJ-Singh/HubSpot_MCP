@@ -2,8 +2,6 @@ import contextlib
 import os
 from contextvars import ContextVar
 from collections.abc import AsyncIterator
-
-
 import click
 import mcp.types as types
 from mcp.server.lowlevel import Server
@@ -14,16 +12,12 @@ from starlette.responses import Response
 from starlette.routing import Mount, Route
 from starlette.types import Receive, Scope, Send
 from dotenv import load_dotenv
-
 import json
 from hubspot import HubSpot
 import logging
-
 from hubspot.crm.contacts import Filter, FilterGroup, PublicObjectSearchRequest
 from hubspot.crm.properties import PropertyCreate
 from hubspot.crm.contacts import SimplePublicObjectInputForCreate, SimplePublicObjectInput
-
-
 from hubspot.crm.companies import SimplePublicObjectInputForCreate
 from hubspot.crm.companies import SimplePublicObjectInput
 
@@ -81,6 +75,113 @@ async def hubspot_list_properties(object_type: str) -> list[dict]:
         logger.exception(f"Error executing hubspot_list_properties: {e}")
         raise e
 
+async def hubspot_search_by_property(
+    object_type: str,
+    property_name: str,
+    operator: str,
+    value: str,
+    properties: list[str],
+    limit: int = 10
+) -> list[dict]:
+    """
+    Search HubSpot objects by property.
+
+    Parameters:
+    - object_type: One of "contacts", "companies", "deals", or "tickets"
+    - property_name: Field to search
+    - operator: Filter operator (see note below)
+    - value: Value to search for
+    - properties: List of fields to return
+    - limit: Max number of results
+
+    Returns:
+    - List of result dictionaries
+
+    Note:
+    Supported operators (with expected value format and behavior):
+
+    - EQ (Equal): Matches records where the property exactly equals the given value.
+      Example: "lifecyclestage" EQ "customer"
+
+    - NEQ (Not Equal): Matches records where the property does not equal the given value.
+      Example: "country" NEQ "India"
+
+    - GT (Greater Than): Matches records where the property is greater than the given value.
+      Example: "numberofemployees" GT "100"
+
+    - GTE (Greater Than or Equal): Matches records where the property is greater than or equal to the given value.
+      Example: "revenue" GTE "50000"
+
+    - LT (Less Than): Matches records where the property is less than the given value.
+      Example: "score" LT "75"
+
+    - LTE (Less Than or Equal): Matches records where the property is less than or equal to the given value.
+      Example: "createdate" LTE "2023-01-01T00:00:00Z"
+
+    - BETWEEN: Matches records where the property is within a specified range.
+      Value must be a list of two values [start, end].
+      Example: "createdate" BETWEEN ["2023-01-01T00:00:00Z", "2023-12-31T23:59:59Z"]
+
+    - IN: Matches records where the property is one of the values in the list.
+      Value must be a list.
+      Example: "industry" IN ["Technology", "Healthcare"]
+
+    - NOT_IN: Matches records where the property is none of the values in the list.
+      Value must be a list.
+      Example: "state" NOT_IN ["CA", "NY"]
+
+    - CONTAINS_TOKEN: Matches records where the property contains the given word/token (case-insensitive).
+      Example: "notes" CONTAINS_TOKEN "demo"
+
+    - NOT_CONTAINS_TOKEN: Matches records where the property does NOT contain the given word/token.
+      Example: "comments" NOT_CONTAINS_TOKEN "urgent"
+
+    - STARTS_WITH: Matches records where the property value starts with the given substring.
+      Example: "firstname" STARTS_WITH "Jo"
+
+    - ENDS_WITH: Matches records where the property value ends with the given substring.
+      Example: "email" ENDS_WITH "@gmail.com"
+
+    - ON_OR_AFTER: For datetime fields, matches records where the date is the same or after the given value.
+      Example: "createdate" ON_OR_AFTER "2024-01-01T00:00:00Z"
+
+    - ON_OR_BEFORE: For datetime fields, matches records where the date is the same or before the given value.
+      Example: "closedate" ON_OR_BEFORE "2024-12-31T23:59:59Z"
+
+    Value type rules:
+    - If the operator expects a list (e.g., IN, BETWEEN), pass value as a JSON-encoded string list: '["a", "b"]'
+    - All other operators expect a single string (even for numbers or dates)
+    """
+    logger.info(f"Executing hubspot_search_by_property on {object_type}: {property_name} {operator} {value}")
+
+    try:
+        search_request = PublicObjectSearchRequest(
+            filter_groups=[
+                FilterGroup(filters=[
+                    Filter(property_name=property_name, operator=operator, value=value)
+                ])
+            ],
+            properties=list(properties),
+            limit=limit
+        )
+
+        if object_type == "contacts":
+            results =  client.crm.contacts.search_api.do_search(public_object_search_request=search_request)
+        elif object_type == "companies":
+            results =  client.crm.companies.search_api.do_search(public_object_search_request=search_request)
+        elif object_type == "deals":
+            results =  client.crm.deals.search_api.do_search(public_object_search_request=search_request)
+        elif object_type == "tickets":
+            results =  client.crm.tickets.search_api.do_search(public_object_search_request=search_request)
+        else:
+            raise ValueError(f"Unsupported object type: {object_type}")
+
+        logger.info(f"hubspot_search_by_property: Found {len(results.results)} result(s)")
+        return [obj.properties for obj in results.results]
+
+    except Exception as e:
+        logger.exception(f"Error executing hubspot_search_by_property: {e}")
+        return (f"Error executing hubspot_search_by_property: {e}")
 
 
 # <-------------------------- Contacts -------------------------->
@@ -594,6 +695,95 @@ def main(
                 }
             ),
             types.Tool(
+                name="hubspot_search_by_property",
+                description="Search HubSpot objects by a specific property and value using a filter operator.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "object_type": {
+                            "type": "string",
+                            "description": "The object type to search (contacts, companies, deals, tickets)."
+                        },
+                        "property_name": {
+                            "type": "string",
+                            "description": "The property name to filter by."
+                        },
+                        "operator": {
+                            "type": "string",
+                            "description": """Filter operator
+                                            Supported operators (with expected value format and behavior):
+                                        
+                                            - EQ (Equal): Matches records where the property exactly equals the given value.  
+                                              Example: "lifecyclestage" EQ "customer"
+                                        
+                                            - NEQ (Not Equal): Matches records where the property does not equal the given value.  
+                                              Example: "country" NEQ "India"
+                                        
+                                            - GT (Greater Than): Matches records where the property is greater than the given value.  
+                                              Example: "numberofemployees" GT "100"
+                                        
+                                            - GTE (Greater Than or Equal): Matches records where the property is greater than or equal to the given value.  
+                                              Example: "revenue" GTE "50000"
+                                        
+                                            - LT (Less Than): Matches records where the property is less than the given value.  
+                                              Example: "score" LT "75"
+                                        
+                                            - LTE (Less Than or Equal): Matches records where the property is less than or equal to the given value.  
+                                              Example: "createdate" LTE "2023-01-01T00:00:00Z"
+                                        
+                                            - BETWEEN: Matches records where the property is within a specified range.  
+                                              Value must be a list of two values [start, end].  
+                                              Example: "createdate" BETWEEN ["2023-01-01T00:00:00Z", "2023-12-31T23:59:59Z"]
+                                        
+                                            - IN: Matches records where the property is one of the values in the list.  
+                                              Value must be a list.  
+                                              Example: "industry" IN ["Technology", "Healthcare"]
+                                        
+                                            - NOT_IN: Matches records where the property is none of the values in the list.  
+                                              Value must be a list.  
+                                              Example: "state" NOT_IN ["CA", "NY"]
+                                        
+                                            - CONTAINS_TOKEN: Matches records where the property contains the given word/token (case-insensitive).  
+                                              Example: "notes" CONTAINS_TOKEN "demo"
+                                        
+                                            - NOT_CONTAINS_TOKEN: Matches records where the property does NOT contain the given word/token.  
+                                              Example: "comments" NOT_CONTAINS_TOKEN "urgent"
+                                        
+                                            - STARTS_WITH: Matches records where the property value starts with the given substring.  
+                                              Example: "firstname" STARTS_WITH "Jo"
+                                        
+                                            - ENDS_WITH: Matches records where the property value ends with the given substring.  
+                                              Example: "email" ENDS_WITH "@gmail.com"
+                                        
+                                            - ON_OR_AFTER: For datetime fields, matches records where the date is the same or after the given value.  
+                                              Example: "createdate" ON_OR_AFTER "2024-01-01T00:00:00Z"
+                                        
+                                            - ON_OR_BEFORE: For datetime fields, matches records where the date is the same or before the given value.  
+                                              Example: "closedate" ON_OR_BEFORE "2024-12-31T23:59:59Z"
+                                        
+                                            Value type rules:
+                                            - If the operator expects a list (e.g., IN, BETWEEN), pass value as a JSON-encoded string list: '["a", "b"]'
+                                            - All other operators expect a single string (even for numbers or dates)"""
+                        },
+                        "value": {
+                            "type": "string",
+                            "description": "The value to match against the property."
+                        },
+                        "properties": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "List of properties to return in the result."
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "default": 10,
+                            "description": "Maximum number of results to return."
+                        }
+                    },
+                    "required": ["object_type", "property_name", "operator", "value", "properties"]
+                }
+            ),
+            types.Tool(
                 name="get_HubSpot_contacts",
                 description="Fetch a list of contacts from HubSpot.",
                 inputSchema={
@@ -926,6 +1116,26 @@ def main(
                 object_type = arguments.get("object_type")
                 result = await hubspot_list_properties(object_type)
                 return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
+            elif name == "hubspot_search_by_property":
+                object_type = arguments.get("object_type")
+                property_name = arguments.get("property_name")
+                operator = arguments.get("operator")
+                value = arguments.get("value")
+                properties = arguments.get("properties", [])
+                limit = arguments.get("limit", 10)
+
+                if not all([object_type, property_name, operator, value, properties]):
+                    return [types.TextContent(
+                        type="text",
+                        text="Missing required parameters. Required: object_type, property_name, operator, value, properties."
+                    )]
+
+                result = await hubspot_search_by_property(
+                    object_type, property_name, operator, value, properties, limit
+                )
+                return [types.TextContent(type="text", text=json.dumps(result, indent=2))]
+
 
             elif name == "get_HubSpot_contacts":
                 limit = arguments.get("limit", 10)
