@@ -9,6 +9,17 @@ from hubspot.crm.contacts import SimplePublicObjectInputForCreate, Filter, Filte
 import os
 import json
 import asyncio
+import json
+from hubspot import HubSpot
+import logging
+
+from hubspot.crm.contacts import Filter, FilterGroup, PublicObjectSearchRequest
+from hubspot.crm.properties import PropertyCreate
+from hubspot.crm.contacts import SimplePublicObjectInputForCreate, SimplePublicObjectInput
+
+
+from hubspot.crm.companies import SimplePublicObjectInputForCreate
+from hubspot.crm.companies import SimplePublicObjectInput
 
 
 
@@ -16,152 +27,151 @@ import asyncio
 # ====== MCP Setup ======
 mcp = FastMCP("HubSpot")
 
-# ====== Config ======
-CLIENT_ID = "930200dd-a49b-4e00-b6db-194c506de7df"
-CLIENT_SECRET = "f3463abf-8286-4ed7-96d5-437620aa399c"
-REDIRECT_URI = "http://localhost:9999/callback"
-TOKEN_FILE = "hubspot_token.json"
-SCOPES = (
-    "crm.objects.companies.read "
-    "crm.objects.companies.write "
-    "crm.objects.contacts.read "
-    "crm.objects.contacts.write "
-    "crm.schemas.companies.read "
-    "crm.schemas.companies.write "
-    "crm.schemas.contacts.read "
-    "crm.schemas.contacts.write "
-    "oauth"
-)
+@mcp.tool()
+async def hubspot_list_properties(object_type: str) -> list[dict]:
+    """
+    List all properties for a given object type.
 
-# ====== Handle Redirect Auth ======
-def get_auth_code():
-    code_holder = {}
+    Parameters:
+    - object_type: One of "contacts", "companies", "deals", or "tickets"
 
-    class OAuthHandler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            parsed_url = urlparse(self.path)
-            query = parse_qs(parsed_url.query)
-            if "code" in query:
-                code_holder['code'] = query["code"][0]
-                self.send_response(200)
-                self.end_headers()
-                self.wfile.write(b"Auth successful. You can close this tab.")
-            else:
-                self.send_error(400, "No code in redirect.")
+    Returns:
+    - List of property metadata
+    """
+    client = HubSpot(
+        access_token="COiA95T5MhIbQlNQMl8kQEwrAg4ACAkIDhIJBB4BAQEBAQEBGO-Q83Mg58rJJijD9O0GMhRNzR7nfwFdxlF8fk3tzWXFgP5i2To6QlNQMl8kQEwrAi0ACBkGKAEBAQFFOwESHAEBEgEBAQQyBAEBAQEBAQEBAQEBAQEBAQEBARgBAQEBAUIUa-dlneDVHDKyFftg0P0Cb182r4NKA25hMlIAWgBgAGjnyskmcAA")
 
-    def run_server():
-        server = HTTPServer(('localhost', 9999), OAuthHandler)
-        server.handle_request()
+    props = client.crm.properties.core_api.get_all(object_type)
+    return [
+        {
+            "name": p.name,
+            "label": p.label,
+            "type": p.type,
+            "field_type": p.field_type
+        }
+        for p in props.results
+    ]
 
-    threading.Thread(target=run_server, daemon=True).start()
+# <-------------------------- Contacts -------------------------->
 
-    params = {
-        "client_id": CLIENT_ID,
-        "redirect_uri": REDIRECT_URI,
-        "scope": SCOPES,
-        "response_type": "code"
-    }
-    auth_url = f"https://app.hubspot.com/oauth/authorize?{urlencode(params)}"
-    print("Opening browser for auth...")
-    webbrowser.open(auth_url)
+@mcp.tool()
+async def get_HubSpot_contacts(limit: int = 10):
+    """
+    Fetch a list of contacts from HubSpot.
 
-    while 'code' not in code_holder:
-        pass
+    Parameters:
+    - limit: Number of contacts to retrieve
 
-    return code_holder['code']
+    Returns:
+    - Paginated contacts response
+    """
+    client = HubSpot(access_token="CK2_9pP5MhIbQlNQMl8kQEwrAg4ACAkIDhIJBB4BAQEBAQEBGO-Q83Mg58rJJijD9O0GMhSS_GLiPXDQyFG3Q0XF7vRiKzZqrTo6QlNQMl8kQEwrAi0ACBkGKAEBAQFFOwESHAEBEgEBAQQyBAEBAQEBAQEBAQEBAQEBAQEBARgBAQEBAUIUDwxNBrxS8HdHqt1Hx6SIQmAZY61KA25hMlIAWgBgAGjnyskmcAA")
 
-# ====== Ensure Tokens ======
-async def ensure_creds():
-    def save_token(access_token):
-        with open(TOKEN_FILE, "w") as f:
-            json.dump({"access_token": access_token}, f)
-        os.chmod(TOKEN_FILE, 0o600)
-
-    def load_token():
-        if os.path.exists(TOKEN_FILE):
-            with open(TOKEN_FILE, "r") as f:
-                return json.load(f).get("access_token")
-        return None
-
-    def get_new_token():
-        code = get_auth_code()
-        print("Got auth code")
-
-        try:
-            temp_client = HubSpot()
-            tokens = temp_client.oauth.tokens_api.create(
-                grant_type="authorization_code",
-                redirect_uri=REDIRECT_URI,
-                client_id=CLIENT_ID,
-                client_secret=CLIENT_SECRET,
-                code=code
-            )
-            access_token = tokens.access_token
-            save_token(access_token)
-            print("Access token saved")
-            return access_token
-        except ApiException as e:
-            print("Failed to fetch tokens:", e)
-            exit()
-
-    access_token = load_token() or get_new_token()
-    client = HubSpot(access_token=access_token)
-
-    try:
-        client.crm.contacts.basic_api.get_page(limit=1)
-        return client
-    except ApiException as e:
-        if e.status == 401:
-            print("Token expired or invalid. Getting new one...")
-            access_token = get_new_token()
-            return HubSpot(access_token=access_token)
-        else:
-            print("HubSpot API error:", e)
-            exit()
+    return client.crm.contacts.basic_api.get_page(limit=limit)
 
 
 @mcp.tool()
-async def create_contact(
-    firstname: str,
-    email: str,
-    lastname: str | None = None,
-    phone: str | None = None,
-    **kwargs
-) -> None:
+async def get_HubSpot_contact_by_id(contact_id: str):
     """
-    Creates a new contact in HubSpot.
+    Get a specific contact by ID.
 
     Parameters:
-    - firstname: Contact's first name
-    - email: Contact's email address
-    - lastname: (Optional) Contact's last name
-    - phone: (Optional) Contact's phone number
-    - **kwargs: (Optional) Contact's keyword arguments
+    - contact_id: ID of the contact to retrieve
 
-    This will create a contact with the given details and print the new contact's ID.
+    Returns:
+    - Contact object
     """
+    client = HubSpot(access_token="CK2_9pP5MhIbQlNQMl8kQEwrAg4ACAkIDhIJBB4BAQEBAQEBGO-Q83Mg58rJJijD9O0GMhSS_GLiPXDQyFG3Q0XF7vRiKzZqrTo6QlNQMl8kQEwrAi0ACBkGKAEBAQFFOwESHAEBEgEBAQQyBAEBAQEBAQEBAQEBAQEBAQEBARgBAQEBAUIUDwxNBrxS8HdHqt1Hx6SIQmAZY61KA25hMlIAWgBgAGjnyskmcAA")
 
-    properties = {
-        "firstname": firstname,
-        "email": email
-    }
-    if phone:
-        properties["phone"] = phone
-    if lastname:
-        properties["lastname"] = lastname
+    return client.crm.contacts.basic_api.get_by_id(contact_id)
 
 
+@mcp.tool()
+async def hubspot_create_property(name: str, label: str, description: str) -> str:
+    """
+    Create a new custom property for contacts.
+
+    Parameters:
+    - name: Internal property name
+    - label: Display label for the property
+    - description: Description of the property
+
+    Returns:
+    - Confirmation message
+    """
+    client = HubSpot(access_token="CK2_9pP5MhIbQlNQMl8kQEwrAg4ACAkIDhIJBB4BAQEBAQEBGO-Q83Mg58rJJijD9O0GMhSS_GLiPXDQyFG3Q0XF7vRiKzZqrTo6QlNQMl8kQEwrAi0ACBkGKAEBAQFFOwESHAEBEgEBAQQyBAEBAQEBAQEBAQEBAQEBAQEBARgBAQEBAUIUDwxNBrxS8HdHqt1Hx6SIQmAZY61KA25hMlIAWgBgAGjnyskmcAA")
+
+    property = PropertyCreate(
+        name=name,
+        label=label,
+        group_name="contactinformation",
+        type="string",
+        description=description
+    )
+    client.crm.properties.core_api.create(
+        object_type="contacts",
+        property_create=property
+    )
+    return "Property Created"
 
 
+@mcp.tool()
+async def hubspot_delete_contant_by_id(contact_id: str) -> str:
+    """
+    Delete a contact by ID.
+
+    Parameters:
+    - contact_id: ID of the contact to delete
+
+    Returns:
+    - Status message
+    """
+    client = HubSpot(access_token="CK2_9pP5MhIbQlNQMl8kQEwrAg4ACAkIDhIJBB4BAQEBAQEBGO-Q83Mg58rJJijD9O0GMhSS_GLiPXDQyFG3Q0XF7vRiKzZqrTo6QlNQMl8kQEwrAi0ACBkGKAEBAQFFOwESHAEBEgEBAQQyBAEBAQEBAQEBAQEBAQEBAQEBARgBAQEBAUIUDwxNBrxS8HdHqt1Hx6SIQmAZY61KA25hMlIAWgBgAGjnyskmcAA")
+
+    client.crm.contacts.basic_api.archive(contact_id)
+    return "Deleted"
 
 
+@mcp.tool()
+async def hubspot_create_contact(properties: str) -> str:
+    """
+    Create a new contact using JSON string of properties.
+
+    Parameters:
+    - properties: JSON string containing contact fields
+
+    Returns:
+    - Status message
+    """
+    client = HubSpot(access_token="CK2_9pP5MhIbQlNQMl8kQEwrAg4ACAkIDhIJBB4BAQEBAQEBGO-Q83Mg58rJJijD9O0GMhSS_GLiPXDQyFG3Q0XF7vRiKzZqrTo6QlNQMl8kQEwrAi0ACBkGKAEBAQFFOwESHAEBEgEBAQQyBAEBAQEBAQEBAQEBAQEBAQEBARgBAQEBAUIUDwxNBrxS8HdHqt1Hx6SIQmAZY61KA25hMlIAWgBgAGjnyskmcAA")
+
+    properties = json.loads(properties)
+    data = SimplePublicObjectInputForCreate(properties=properties)
+    client.crm.contacts.basic_api.create(simple_public_object_input_for_create=data)
+    return "Created"
 
 
+@mcp.tool()
+async def hubspot_update_contact_by_id(contact_id: str, updates: str) -> str:
+    """
+    Update a contact by ID.
 
+    Parameters:
+    - contact_id: ID of the contact to update
+    - updates: JSON string of properties to update
 
+    Returns:
+    - Status message
+    """
+    updates = json.loads(updates)
+    data = SimplePublicObjectInput(properties=updates)
+    client = HubSpot(access_token="CK2_9pP5MhIbQlNQMl8kQEwrAg4ACAkIDhIJBB4BAQEBAQEBGO-Q83Mg58rJJijD9O0GMhSS_GLiPXDQyFG3Q0XF7vRiKzZqrTo6QlNQMl8kQEwrAi0ACBkGKAEBAQFFOwESHAEBEgEBAQQyBAEBAQEBAQEBAQEBAQEBAQEBARgBAQEBAUIUDwxNBrxS8HdHqt1Hx6SIQmAZY61KA25hMlIAWgBgAGjnyskmcAA")
 
-
-
+    try:
+        client.crm.contacts.basic_api.update(contact_id, data)
+        return "Done"
+    except Exception as e:
+        return f"Error occurred: {e}"
 
 
 

@@ -23,12 +23,18 @@ SCOPES = (
     "crm.objects.companies.write "
     "crm.objects.contacts.read "
     "crm.objects.contacts.write "
+    "crm.objects.deals.read "
+    "crm.objects.deals.write "
     "crm.schemas.companies.read "
     "crm.schemas.companies.write "
     "crm.schemas.contacts.read "
     "crm.schemas.contacts.write "
-    "oauth"
+    "crm.schemas.deals.read "
+    "crm.schemas.deals.write "
+    "oauth "
+    "tickets"
 )
+
 
 # ====== Handle Redirect Auth ======
 def get_auth_code():
