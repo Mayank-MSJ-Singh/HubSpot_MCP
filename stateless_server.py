@@ -15,14 +15,40 @@ from dotenv import load_dotenv
 import json
 from hubspot import HubSpot
 import logging
-from hubspot.crm.contacts import Filter, FilterGroup, PublicObjectSearchRequest
-from hubspot.crm.properties import PropertyCreate
-from hubspot.crm.contacts import SimplePublicObjectInputForCreate, SimplePublicObjectInput
-from hubspot.crm.companies import SimplePublicObjectInputForCreate
-from hubspot.crm.companies import SimplePublicObjectInput
+from tools import (
+    # properties
+    hubspot_list_properties,
+    hubspot_search_by_property,
+    hubspot_create_property,
 
+    # Contacts
+    get_HubSpot_contacts,
+    get_HubSpot_contact_by_id,
+    hubspot_create_contact,
+    hubspot_update_contact_by_id,
+    hubspot_delete_contant_by_id,
 
+    # Companies
+    get_HubSpot_companies,
+    get_HubSpot_companies_by_id,
+    hubspot_create_companies,
+    hubspot_update_company_by_id,
+    hubspot_delete_company_by_id,
 
+    # Deals
+    get_HubSpot_deals,
+    get_HubSpot_deal_by_id,
+    hubspot_create_deal,
+    hubspot_update_deal_by_id,
+    hubspot_delete_deal_by_id,
+
+    # Tickets
+    get_HubSpot_tickets,
+    get_HubSpot_ticket_by_id,
+    hubspot_create_ticket,
+    hubspot_update_ticket_by_id,
+    hubspot_delete_ticket_by_id,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -38,7 +64,8 @@ auth_token_context: ContextVar[str] = ContextVar('auth_token')
 
 
 class RetryableToolError(Exception):
-    def __init__(self, message: str, additional_prompt_content: str = "", retry_after_ms: int = 1000, developer_message: str = ""):
+    def __init__(self, message: str, additional_prompt_content: str = "", retry_after_ms: int = 1000,
+                 developer_message: str = ""):
         super().__init__(message)
         self.additional_prompt_content = additional_prompt_content
         self.retry_after_ms = retry_after_ms
@@ -46,624 +73,6 @@ class RetryableToolError(Exception):
 
 
 
-#=======================================Tools Start=======================================
-
-# <-------------------------- Basic -------------------------->
-
-async def hubspot_list_properties(object_type: str) -> list[dict]:
-    """
-    List all properties for a given object type.
-
-    Parameters:
-    - object_type: One of "contacts", "companies", "deals", or "tickets"
-
-    Returns:
-    - List of property metadata
-    """
-    logger.info(f"Executing hubspot_list_properties for object_type: {object_type}")
-    try:
-        props = client.crm.properties.core_api.get_all(object_type)
-        logger.info(f"Successfully Executed hubspot_list_properties for object_type: {object_type}")
-        return [
-            {
-                "name": p.name,
-                "label": p.label,
-                "type": p.type,
-                "field_type": p.field_type
-            }
-            for p in props.results
-        ]
-    except Exception as e:
-        logger.exception(f"Error executing hubspot_list_properties: {e}")
-        raise e
-
-async def hubspot_search_by_property(
-    object_type: str,
-    property_name: str,
-    operator: str,
-    value: str,
-    properties: list[str],
-    limit: int = 10
-) -> list[dict]:
-    """
-    Search HubSpot objects by property.
-
-    Parameters:
-    - object_type: One of "contacts", "companies", "deals", or "tickets"
-    - property_name: Field to search
-    - operator: Filter operator (see note below)
-    - value: Value to search for
-    - properties: List of fields to return
-    - limit: Max number of results
-
-    Returns:
-    - List of result dictionaries
-
-    Note:
-    Supported operators (with expected value format and behavior):
-
-    - EQ (Equal): Matches records where the property exactly equals the given value.
-      Example: "lifecyclestage" EQ "customer"
-
-    - NEQ (Not Equal): Matches records where the property does not equal the given value.
-      Example: "country" NEQ "India"
-
-    - GT (Greater Than): Matches records where the property is greater than the given value.
-      Example: "numberofemployees" GT "100"
-
-    - GTE (Greater Than or Equal): Matches records where the property is greater than or equal to the given value.
-      Example: "revenue" GTE "50000"
-
-    - LT (Less Than): Matches records where the property is less than the given value.
-      Example: "score" LT "75"
-
-    - LTE (Less Than or Equal): Matches records where the property is less than or equal to the given value.
-      Example: "createdate" LTE "2023-01-01T00:00:00Z"
-
-    - BETWEEN: Matches records where the property is within a specified range.
-      Value must be a list of two values [start, end].
-      Example: "createdate" BETWEEN ["2023-01-01T00:00:00Z", "2023-12-31T23:59:59Z"]
-
-    - IN: Matches records where the property is one of the values in the list.
-      Value must be a list.
-      Example: "industry" IN ["Technology", "Healthcare"]
-
-    - NOT_IN: Matches records where the property is none of the values in the list.
-      Value must be a list.
-      Example: "state" NOT_IN ["CA", "NY"]
-
-    - CONTAINS_TOKEN: Matches records where the property contains the given word/token (case-insensitive).
-      Example: "notes" CONTAINS_TOKEN "demo"
-
-    - NOT_CONTAINS_TOKEN: Matches records where the property does NOT contain the given word/token.
-      Example: "comments" NOT_CONTAINS_TOKEN "urgent"
-
-    - STARTS_WITH: Matches records where the property value starts with the given substring.
-      Example: "firstname" STARTS_WITH "Jo"
-
-    - ENDS_WITH: Matches records where the property value ends with the given substring.
-      Example: "email" ENDS_WITH "@gmail.com"
-
-    - ON_OR_AFTER: For datetime fields, matches records where the date is the same or after the given value.
-      Example: "createdate" ON_OR_AFTER "2024-01-01T00:00:00Z"
-
-    - ON_OR_BEFORE: For datetime fields, matches records where the date is the same or before the given value.
-      Example: "closedate" ON_OR_BEFORE "2024-12-31T23:59:59Z"
-
-    Value type rules:
-    - If the operator expects a list (e.g., IN, BETWEEN), pass value as a JSON-encoded string list: '["a", "b"]'
-    - All other operators expect a single string (even for numbers or dates)
-    """
-    logger.info(f"Executing hubspot_search_by_property on {object_type}: {property_name} {operator} {value}")
-
-    try:
-        search_request = PublicObjectSearchRequest(
-            filter_groups=[
-                FilterGroup(filters=[
-                    Filter(property_name=property_name, operator=operator, value=value)
-                ])
-            ],
-            properties=list(properties),
-            limit=limit
-        )
-
-        if object_type == "contacts":
-            results =  client.crm.contacts.search_api.do_search(public_object_search_request=search_request)
-        elif object_type == "companies":
-            results =  client.crm.companies.search_api.do_search(public_object_search_request=search_request)
-        elif object_type == "deals":
-            results =  client.crm.deals.search_api.do_search(public_object_search_request=search_request)
-        elif object_type == "tickets":
-            results =  client.crm.tickets.search_api.do_search(public_object_search_request=search_request)
-        else:
-            raise ValueError(f"Unsupported object type: {object_type}")
-
-        logger.info(f"hubspot_search_by_property: Found {len(results.results)} result(s)")
-        return [obj.properties for obj in results.results]
-
-    except Exception as e:
-        logger.exception(f"Error executing hubspot_search_by_property: {e}")
-        return (f"Error executing hubspot_search_by_property: {e}")
-
-async def hubspot_create_property(name: str, label: str, description: str, object_type: str) -> str:
-    """
-    Create a new custom property for HubSpot objects.
-
-    Parameters:
-    - name: Internal property name
-    - label: Display label for the property
-    - description: Description of the property
-    - object_type: Type of the property, 'contacts', 'companies', 'deals' or 'tickets'
-
-    Returns:
-    - Confirmation message
-    """
-    try:
-        logger.info(f"Creating property with name: {name}, label: {label}, object_type: {object_type}")
-
-        group_map = {
-            "contacts": "contactinformation",
-            "companies": "companyinformation",
-            "deals": "dealinformation",
-            "tickets": "ticketinformation"
-        }
-
-        if object_type not in group_map:
-            raise ValueError(f"Invalid object_type '{object_type}'")
-
-        group_name = group_map[object_type]
-
-        property = PropertyCreate(
-            name=name,
-            label=label,
-            group_name=group_name,
-            type="string",
-            description=description
-        )
-
-        client.crm.properties.core_api.create(
-            object_type=object_type,
-            property_create=property
-        )
-
-        logger.info("Successfully created property")
-        return "Property Created"
-    except Exception as e:
-        logger.error(f"Error creating property: {e}")
-        raise e
-
-
-# <-------------------------- Contacts -------------------------->
-
-async def get_HubSpot_contacts(limit: int = 10):
-    """
-    Fetch a list of contacts from HubSpot.
-
-    Parameters:
-    - limit: Number of contacts to retrieve
-
-    Returns:
-    - Paginated contacts response
-    """
-    try:
-        logger.info(f"Fetching up to {limit} contacts from HubSpot")
-        result = client.crm.contacts.basic_api.get_page(limit=limit)
-        logger.info("Successfully fetched contacts")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching contacts: {e}")
-        raise e
-
-
-async def get_HubSpot_contact_by_id(contact_id: str):
-    """
-    Get a specific contact by ID.
-
-    Parameters:
-    - contact_id: ID of the contact to retrieve
-
-    Returns:
-    - Contact object
-    """
-    try:
-        logger.info(f"Fetching contact with ID: {contact_id}")
-        result = client.crm.contacts.basic_api.get_by_id(contact_id)
-        logger.info("Successfully fetched contact")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching contact by ID: {e}")
-        raise e
-
-
-async def hubspot_delete_contant_by_id(contact_id: str) -> str:
-    """
-    Delete a contact by ID.
-
-    Parameters:
-    - contact_id: ID of the contact to delete
-
-    Returns:
-    - Status message
-    """
-    try:
-        logger.info(f"Deleting contact with ID: {contact_id}")
-        client.crm.contacts.basic_api.archive(contact_id)
-        logger.info("Successfully deleted contact")
-        return "Deleted"
-    except Exception as e:
-        logger.error(f"Error deleting contact: {e}")
-        raise e
-
-
-async def hubspot_create_contact(properties: str) -> str:
-    """
-    Create a new contact using JSON string of properties.
-
-    Parameters:
-    - properties: JSON string containing contact fields
-
-    Returns:
-    - Status message
-    """
-    try:
-        properties = json.loads(properties)
-        logger.info(f"Creating contact with properties: {properties}")
-        data = SimplePublicObjectInputForCreate(properties=properties)
-        client.crm.contacts.basic_api.create(simple_public_object_input_for_create=data)
-        logger.info("Successfully created contact")
-        return "Created"
-    except Exception as e:
-        logger.error(f"Error creating contact: {e}")
-        raise e
-
-
-async def hubspot_update_contact_by_id(contact_id: str, updates: str) -> str:
-    """
-    Update a contact by ID.
-
-    Parameters:
-    - contact_id: ID of the contact to update
-    - updates: JSON string of properties to update
-
-    Returns:
-    - Status message
-    """
-    try:
-        updates = json.loads(updates)
-        logger.info(f"Updating contact ID: {contact_id} with updates: {updates}")
-        data = SimplePublicObjectInput(properties=updates)
-        client.crm.contacts.basic_api.update(contact_id, data)
-        logger.info("Successfully updated contact")
-        return "Done"
-    except Exception as e:
-        logger.error(f"Update failed: {e}")
-        return f"Error occurred: {e}"
-
-
-
-
-
-# <-------------------------- Companies -------------------------->
-
-async def hubspot_create_companies(properties: str) -> str:
-    """
-    Create a new company using JSON string of properties.
-
-    Parameters:
-    - properties: JSON string of company fields
-
-    Returns:
-    - Status message
-    """
-    try:
-        logger.info("Creating company...")
-        properties = json.loads(properties)
-        data = SimplePublicObjectInputForCreate(properties=properties)
-        client.crm.companies.basic_api.create(simple_public_object_input_for_create=data)
-        logger.info("Company created successfully.")
-        return "Created"
-    except Exception as e:
-        logger.error(f"Error creating company: {e}")
-        return f"Error occurred: {e}"
-
-
-async def get_HubSpot_companies(limit: int = 10):
-    """
-    Fetch a list of companies from HubSpot.
-
-    Parameters:
-    - limit: Number of companies to retrieve
-
-    Returns:
-    - Paginated companies response
-    """
-    try:
-        logger.info(f"Fetching up to {limit} companies...")
-        result = client.crm.companies.basic_api.get_page(limit=limit)
-        logger.info(f"Fetched {len(result.results)} companies successfully.")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching companies: {e}")
-        return None
-
-
-async def get_HubSpot_companies_by_id(company_id: str):
-    """
-    Get a company by ID.
-
-    Parameters:
-    - company_id: ID of the company
-
-    Returns:
-    - Company object
-    """
-    try:
-        logger.info(f"Fetching company with ID: {company_id}...")
-        result = client.crm.companies.basic_api.get_by_id(company_id)
-        logger.info(f"Fetched company ID: {company_id} successfully.")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching company by ID: {e}")
-        return None
-
-
-async def hubspot_update_company_by_id(company_id: str, updates: str) -> str:
-    """
-    Update a company by ID.
-
-    Parameters:
-    - company_id: ID of the company to update
-    - updates: JSON string of property updates
-
-    Returns:
-    - Status message
-    """
-    try:
-        logger.info(f"Updating company ID: {company_id}...")
-        updates = json.loads(updates)
-        update = SimplePublicObjectInput(properties=updates)
-        client.crm.companies.basic_api.update(company_id, update)
-        logger.info(f"Company ID: {company_id} updated successfully.")
-        return "Done"
-    except Exception as e:
-        logger.error(f"Update failed: {e}")
-        return f"Error occurred: {e}"
-
-
-async def hubspot_delete_company_by_id(company_id: str) -> str:
-    """
-    Delete a company by ID.
-
-    Parameters:
-    - company_id: ID of the company
-
-    Returns:
-    - Status message
-    """
-    try:
-        logger.info(f"Deleting company ID: {company_id}...")
-        client.crm.companies.basic_api.archive(company_id)
-        logger.info(f"Company ID: {company_id} deleted successfully.")
-        return "Deleted"
-    except Exception as e:
-        logger.error(f"Error deleting company: {e}")
-        return f"Error occurred: {e}"
-
-
-# <--------------------------Deals-------------------------->
-
-async def get_HubSpot_deals(limit: int = 10):
-    """
-    Fetch a list of deals from HubSpot.
-
-    Parameters:
-    - limit: Number of deals to return
-
-    Returns:
-    - List of deal records
-    """
-    try:
-        logger.info(f"Fetching up to {limit} deals...")
-        result = client.crm.deals.basic_api.get_page(limit=limit)
-        logger.info(f"Fetched {len(result.results)} deals successfully.")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching deals: {e}")
-        return None
-
-
-async def get_HubSpot_deal_by_id(deal_id: str):
-    """
-    Fetch a deal by its ID.
-
-    Parameters:
-    - deal_id: HubSpot deal ID
-
-    Returns:
-    - Deal object
-    """
-    try:
-        logger.info(f"Fetching deal ID: {deal_id}...")
-        result = client.crm.deals.basic_api.get_by_id(deal_id)
-        logger.info(f"Fetched deal ID: {deal_id} successfully.")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching deal by ID: {e}")
-        return None
-
-
-async def hubspot_create_deal(properties: str):
-    """
-    Create a new deal.
-
-    Parameters:
-    - properties: JSON string of deal properties
-
-    Returns:
-    - Newly created deal
-    """
-    try:
-        logger.info("Creating a new deal...")
-        props = json.loads(properties)
-        data = SimplePublicObjectInputForCreate(properties=props)
-        result = client.crm.deals.basic_api.create(simple_public_object_input_for_create=data)
-        logger.info("Deal created successfully.")
-        return result
-    except Exception as e:
-        logger.error(f"Error creating deal: {e}")
-        return f"Error occurred: {e}"
-
-
-async def hubspot_update_deal_by_id(deal_id: str, updates: str):
-    """
-    Update a deal by ID.
-
-    Parameters:
-    - deal_id: HubSpot deal ID
-    - updates: JSON string of updated fields
-
-    Returns:
-    - "Done" on success, error message otherwise
-    """
-    try:
-        logger.info(f"Updating deal ID: {deal_id}...")
-        data = SimplePublicObjectInput(properties=json.loads(updates))
-        client.crm.deals.basic_api.update(deal_id, data)
-        logger.info(f"Deal ID: {deal_id} updated successfully.")
-        return "Done"
-    except Exception as e:
-        logger.error(f"Update failed for deal ID {deal_id}: {e}")
-        return f"Error occurred: {e}"
-
-
-async def hubspot_delete_deal_by_id(deal_id: str):
-    """
-    Delete a deal by ID.
-
-    Parameters:
-    - deal_id: HubSpot deal ID
-
-    Returns:
-    - None
-    """
-    try:
-        logger.info(f"Deleting deal ID: {deal_id}...")
-        client.crm.deals.basic_api.archive(deal_id)
-        logger.info(f"Deal ID: {deal_id} deleted successfully.")
-        return "Deleted"
-    except Exception as e:
-        logger.error(f"Error deleting deal: {e}")
-        return f"Error occurred: {e}"
-
-
-# <--------------------------Tickets-------------------------->
-
-async def get_HubSpot_tickets(limit: int = 10):
-    """
-    Fetch a list of tickets from HubSpot.
-
-    Parameters:
-    - limit: Number of tickets to return
-
-    Returns:
-    - List of ticket records
-    """
-    try:
-        logger.info(f"Fetching up to {limit} tickets...")
-        result = client.crm.tickets.basic_api.get_page(limit=limit)
-        logger.info(f"Fetched {len(result.results)} tickets successfully.")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching tickets: {e}")
-        return None
-
-
-async def get_HubSpot_ticket_by_id(ticket_id: str):
-    """
-    Fetch a ticket by its ID.
-
-    Parameters:
-    - ticket_id: HubSpot ticket ID
-
-    Returns:
-    - Ticket object
-    """
-    try:
-        logger.info(f"Fetching ticket ID: {ticket_id}...")
-        result = client.crm.tickets.basic_api.get_by_id(ticket_id)
-        logger.info(f"Fetched ticket ID: {ticket_id} successfully.")
-        return result
-    except Exception as e:
-        logger.error(f"Error fetching ticket by ID: {e}")
-        return None
-
-
-async def hubspot_create_ticket(properties: str):
-    """
-    Create a new ticket.
-
-    Parameters:
-    - properties: JSON string of ticket properties
-
-    Returns:
-    - Newly created ticket
-    """
-    try:
-        logger.info("Creating new ticket...")
-        props = json.loads(properties)
-        data = SimplePublicObjectInputForCreate(properties=props)
-        result = client.crm.tickets.basic_api.create(simple_public_object_input_for_create=data)
-        logger.info("Ticket created successfully.")
-        return result
-    except Exception as e:
-        logger.error(f"Error creating ticket: {e}")
-        return f"Error occurred: {e}"
-
-
-async def hubspot_update_ticket_by_id(ticket_id: str, updates: str):
-    """
-    Update a ticket by ID.
-
-    Parameters:
-    - ticket_id: HubSpot ticket ID
-    - updates: JSON string of updated fields
-
-    Returns:
-    - "Done" on success, error message otherwise
-    """
-    try:
-        logger.info(f"Updating ticket ID: {ticket_id}...")
-        data = SimplePublicObjectInput(properties=json.loads(updates))
-        client.crm.tickets.basic_api.update(ticket_id, data)
-        logger.info(f"Ticket ID: {ticket_id} updated successfully.")
-        return "Done"
-    except Exception as e:
-        logger.error(f"Update failed for ticket ID {ticket_id}: {e}")
-        return f"Error occurred: {e}"
-
-
-async def hubspot_delete_ticket_by_id(ticket_id: str):
-    """
-    Delete a ticket by ID.
-
-    Parameters:
-    - ticket_id: HubSpot ticket ID
-
-    Returns:
-    - None
-    """
-    try:
-        logger.info(f"Deleting ticket ID: {ticket_id}...")
-        client.crm.tickets.basic_api.archive(ticket_id)
-        logger.info(f"Ticket ID: {ticket_id} deleted successfully.")
-        return "Deleted"
-    except Exception as e:
-        logger.error(f"Error deleting ticket ID {ticket_id}: {e}")
-        return f"Error occurred: {e}"
-
-
-
-#=======================================Tools Finish=======================================
 
 @click.command()
 @click.option("--port", default=HUBSPOT_MCP_SERVER_PORT, help="Port to listen on for HTTP")
@@ -678,13 +87,11 @@ async def hubspot_delete_ticket_by_id(ticket_id: str):
     default=False,
     help="Enable JSON responses for StreamableHTTP instead of SSE streams",
 )
-
 def main(
-    port: int,
-    log_level: str,
-    json_response: bool,
+        port: int,
+        log_level: str,
+        json_response: bool,
 ) -> int:
-
     # Configure logging
     logging.basicConfig(
         level=getattr(logging, log_level.upper()),
@@ -729,55 +136,55 @@ def main(
                             "type": "string",
                             "description": """Filter operator
                                             Supported operators (with expected value format and behavior):
-                                        
+
                                             - EQ (Equal): Matches records where the property exactly equals the given value.  
                                               Example: "lifecyclestage" EQ "customer"
-                                        
+
                                             - NEQ (Not Equal): Matches records where the property does not equal the given value.  
                                               Example: "country" NEQ "India"
-                                        
+
                                             - GT (Greater Than): Matches records where the property is greater than the given value.  
                                               Example: "numberofemployees" GT "100"
-                                        
+
                                             - GTE (Greater Than or Equal): Matches records where the property is greater than or equal to the given value.  
                                               Example: "revenue" GTE "50000"
-                                        
+
                                             - LT (Less Than): Matches records where the property is less than the given value.  
                                               Example: "score" LT "75"
-                                        
+
                                             - LTE (Less Than or Equal): Matches records where the property is less than or equal to the given value.  
                                               Example: "createdate" LTE "2023-01-01T00:00:00Z"
-                                        
+
                                             - BETWEEN: Matches records where the property is within a specified range.  
                                               Value must be a list of two values [start, end].  
                                               Example: "createdate" BETWEEN ["2023-01-01T00:00:00Z", "2023-12-31T23:59:59Z"]
-                                        
+
                                             - IN: Matches records where the property is one of the values in the list.  
                                               Value must be a list.  
                                               Example: "industry" IN ["Technology", "Healthcare"]
-                                        
+
                                             - NOT_IN: Matches records where the property is none of the values in the list.  
                                               Value must be a list.  
                                               Example: "state" NOT_IN ["CA", "NY"]
-                                        
+
                                             - CONTAINS_TOKEN: Matches records where the property contains the given word/token (case-insensitive).  
                                               Example: "notes" CONTAINS_TOKEN "demo"
-                                        
+
                                             - NOT_CONTAINS_TOKEN: Matches records where the property does NOT contain the given word/token.  
                                               Example: "comments" NOT_CONTAINS_TOKEN "urgent"
-                                        
+
                                             - STARTS_WITH: Matches records where the property value starts with the given substring.  
                                               Example: "firstname" STARTS_WITH "Jo"
-                                        
+
                                             - ENDS_WITH: Matches records where the property value ends with the given substring.  
                                               Example: "email" ENDS_WITH "@gmail.com"
-                                        
+
                                             - ON_OR_AFTER: For datetime fields, matches records where the date is the same or after the given value.  
                                               Example: "createdate" ON_OR_AFTER "2024-01-01T00:00:00Z"
-                                        
+
                                             - ON_OR_BEFORE: For datetime fields, matches records where the date is the same or before the given value.  
                                               Example: "closedate" ON_OR_BEFORE "2024-12-31T23:59:59Z"
-                                        
+
                                             Value type rules:
                                             - If the operator expects a list (e.g., IN, BETWEEN), pass value as a JSON-encoded string list: '["a", "b"]'
                                             - All other operators expect a single string (even for numbers or dates)"""
@@ -1170,6 +577,7 @@ def main(
 
 
             elif name == "hubspot_create_property":
+
                 result = await hubspot_create_property(
                     name=arguments["name"],
                     label=arguments["label"],
@@ -1275,10 +683,8 @@ def main(
             logger.exception(f"Error executing tool {name}: {e}")
             return [types.TextContent(type="text", text=f"Error: {str(e)}")]
 
-
-
-
             # Set up SSE transport
+
     sse = SseServerTransport("/messages/")
 
     async def handle_sse(request):

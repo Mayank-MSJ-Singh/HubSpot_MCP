@@ -61,6 +61,47 @@ def hubspot_search_by_property(object_type, property_name, operator, value, prop
 
     return [obj.properties for obj in results.results]
 
+def hubspot_create_property(name: str, label: str, description: str, object_type: str) -> str:
+    """
+    Create a new custom property for HubSpot objects.
+    """
+    try:
+        logger.info(f"Creating property with name: {name}, label: {label}, object_type: {object_type}")
+
+        group_map = {
+            "contacts": "contactinformation",
+            "companies": "companyinformation",
+            "deals": "dealinformation",
+            "tickets": "ticketinformation"
+        }
+
+        if object_type not in group_map:
+            raise ValueError(f"Invalid object_type '{object_type}'")
+
+        group_name = group_map[object_type]
+
+        property = PropertyCreate(
+            name=name,
+            label=label,
+            group_name=group_name,
+            type="string",        # backend data type
+            field_type="text",    # frontend input type
+            description=description
+        )
+
+        client.crm.properties.core_api.create(
+            object_type=object_type,
+            property_create=property
+        )
+
+        logger.info("Successfully created property")
+        return "Property Created"
+    except Exception as e:
+        logger.error(f"Error creating property: {e}")
+        raise e
+
+
+
 
 
 # <-------------------------- Contacts -------------------------->
@@ -92,32 +133,6 @@ async def get_HubSpot_contact_by_id(contact_id: str):
     """
     return client.crm.contacts.basic_api.get_by_id(contact_id)
 
-
-@mcp.tool()
-async def hubspot_create_property(name: str, label: str, description: str) -> str:
-    """
-    Create a new custom property for contacts.
-
-    Parameters:
-    - name: Internal property name
-    - label: Display label for the property
-    - description: Description of the property
-
-    Returns:
-    - Confirmation message
-    """
-    property = PropertyCreate(
-        name=name,
-        label=label,
-        group_name="contactinformation",
-        type="string",
-        description=description
-    )
-    client.crm.properties.core_api.create(
-        object_type="contacts",
-        property_create=property
-    )
-    return "Property Created"
 
 
 @mcp.tool()
